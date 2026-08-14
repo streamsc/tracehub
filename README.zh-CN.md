@@ -2,9 +2,21 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-当前版本：`v0.1.0-alpha.3`。
+**让 AI 工作跨越 Agent 与平台。**
+
+当前版本：`v0.1.0-alpha.4`。
 
 TraceHub 是一个单用户、多设备的私有 AI Agent 会话中心。第一版读取 Codex 本地 JSONL，会话原文经 gzip 和 age 加密后增量上传，服务端使用 SQLite 保存不可变密文和可搜索的派生索引，再通过本地 stdio MCP 供 Codex 查询。
+
+## 在新设备上衔接工作
+
+在 MacBook 上完成编码和部署工作后，你可以在新的 Linux 设备上安装 Codex CLI，
+连接 TraceHub，并快速找回相关任务历史和工作上下文。
+
+![TraceHub 连接不同设备、Agent 与账号中的 AI 工作](docs/assets/tracehub-vision.svg)
+
+> 产品愿景：不同 Agent 产品通过 TraceHub 共享历史。当前 alpha 版本仅支持 Codex
+> 会话。
 
 ## 数据流
 

@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+**Your AI work, across agents and platforms.**
+
 Current version: `v0.1.0-alpha.4`.
 
 TraceHub is a private, single-user session hub for AI agents across multiple
@@ -9,6 +11,17 @@ devices. The first release reads local Codex JSONL files, incrementally uploads
 gzip-compressed and age-encrypted records, stores immutable ciphertext and a
 derived search index in SQLite, and exposes authorized retrieval through a local
 stdio MCP server.
+
+## Pick up work on a new device
+
+After finishing coding and deployment work on a MacBook, you can install Codex
+CLI on a new Linux device, connect it to TraceHub, and quickly recover the
+relevant task history and working context.
+
+![TraceHub connects AI work across devices, agents, and accounts](docs/assets/tracehub-vision.svg)
+
+> Product vision: multiple agent products share history through TraceHub. The
+> current alpha release supports Codex sessions only.
 
 ## Data flow
 
