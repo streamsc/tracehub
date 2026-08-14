@@ -1,0 +1,14 @@
+{
+  "listen": "0.0.0.0:8080",
+  "database": "/var/lib/tracehub/tracehub.db",
+  "server_private_keys": {
+    "server-2026-01": "/etc/tracehub/keys/server.key"
+  },
+  "devices": {
+    "desktop": {
+      "key_id": "desktop-2026-01",
+      "public_key": "/etc/tracehub/keys/desktop.pub",
+      "enabled": true
+    }
+  }
+}

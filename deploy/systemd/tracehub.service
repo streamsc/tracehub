@@ -1,0 +1,20 @@
+[Unit]
+Description=TraceHub private AI-agent session hub
+After=network.target
+
+[Service]
+Type=simple
+User=tracehub
+Group=tracehub
+ExecStart=/usr/local/bin/tracehub serve --config /etc/tracehub/server.json
+Restart=no
+StateDirectory=tracehub
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/tracehub
+
+[Install]
+WantedBy=multi-user.target

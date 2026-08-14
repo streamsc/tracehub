@@ -1,0 +1,21 @@
+services:
+  tracehub:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    restart: "no"
+    command: ["serve", "--config", "/etc/tracehub/server.json"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./server.json:/etc/tracehub/server.json:ro
+      - ./keys:/etc/tracehub/keys:ro
+      - tracehub-data:/var/lib/tracehub
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  tracehub-data:

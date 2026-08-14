@@ -1,0 +1,9 @@
+.git
+dist
+tracehub
+*.db
+*.db-shm
+*.db-wal
+*.key
+client.json
+server.json

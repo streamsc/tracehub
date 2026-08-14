@@ -1,0 +1,9 @@
+{
+  "device_id": "desktop",
+  "server_url": "https://tracehub.intra.example.com",
+  "codex_dir": "~/.codex",
+  "device_key_id": "desktop-2026-01",
+  "device_private_key": "./device.key",
+  "server_key_id": "server-2026-01",
+  "server_public_key": "./server.pub"
+}
