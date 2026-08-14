@@ -1,0 +1,114 @@
+name: Release artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifacts-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate release version
+        id: version
+        run: |
+          set -euo pipefail
+          source_version="$(go run ./cmd/tracehub version)"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[1-9][0-9]*)?$ ]]; then
+              echo "invalid release tag: ${GITHUB_REF_NAME}" >&2
+              exit 1
+            fi
+            if [[ "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" != "tag" ]]; then
+              echo "release tag must be annotated: ${GITHUB_REF_NAME}" >&2
+              exit 1
+            fi
+            if [[ "${GITHUB_REF_NAME}" != "v${source_version}" ]]; then
+              echo "tag ${GITHUB_REF_NAME} does not match source version v${source_version}" >&2
+              exit 1
+            fi
+          fi
+          echo "version=${source_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check source
+        run: make check
+
+      - name: Build artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          make dist
+          (
+            cd dist
+            sha256sum tracehub-* > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+          if [[ "$(./dist/tracehub-linux-amd64 version)" != "${VERSION}" ]]; then
+            echo "built binary version does not match ${VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracehub-${{ steps.version.outputs.version }}
+          path: |
+            dist/tracehub-darwin-amd64
+            dist/tracehub-darwin-arm64
+            dist/tracehub-linux-amd64
+            dist/tracehub-linux-arm64
+            dist/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Create draft GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          prerelease=()
+          if [[ "${VERSION}" == *-alpha.* ]]; then
+            prerelease+=(--prerelease)
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --draft \
+            "${prerelease[@]}" \
+            --title "TraceHub ${GITHUB_REF_NAME}" \
+            --notes "Automated draft with verified release artifacts. Complete the requirement status and verification notes before publishing." \
+            dist/tracehub-darwin-amd64 \
+            dist/tracehub-darwin-arm64 \
+            dist/tracehub-linux-amd64 \
+            dist/tracehub-linux-arm64 \
+            dist/SHA256SUMS
