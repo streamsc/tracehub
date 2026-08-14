@@ -9,14 +9,20 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
-- Tag-triggered GitHub Actions builds for verified release binaries, checksums,
-  workflow artifacts, and Draft GitHub Releases.
-
 ### Changed
 
 ### Fixed
 
 ### Removed
+
+## [0.1.0-alpha.3] - 2026-08-14
+
+### Added
+
+- Tag-triggered GitHub Actions builds for verified release binaries, checksums,
+  workflow artifacts, and Draft GitHub Releases.
+- Public multi-platform container images for Linux amd64 and arm64 on GitHub
+  Container Registry, published under immutable version tags.
 
 ## [0.1.0-alpha.2] - 2026-08-14
 
