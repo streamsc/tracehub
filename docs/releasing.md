@@ -25,7 +25,7 @@ release and changed to Released by the release pull request.
 that changes user-visible behavior updates the applicable Unreleased category.
 Internal changes that do not affect users do not require an entry.
 
-## Manual release checklist
+## Release checklist
 
 1. Create a release branch and pull request from current `main`.
 2. Confirm the target requirements, linked Issues, tests, documentation,
@@ -33,12 +33,21 @@ Internal changes that do not affect users do not require an entry.
 3. Move relevant Unreleased entries to the exact version and release date.
 4. For a stable release, mark its requirements Released and close the Milestone.
 5. Squash-merge the release pull request into `main`.
-6. Create an annotated tag on the resulting `main` commit.
-7. Create a GitHub Release. Mark an Alpha as a prerelease and list completed and
-   incomplete requirements.
-8. Upload immutable artifacts and a SHA-256 checksum file.
-9. Install from only the published artifacts and run the documented core flow on
+6. Create and push an annotated tag on the resulting `main` commit. The tag must
+   exactly match the version reported by `tracehub version`.
+7. Wait for the Release artifacts workflow to pass. It runs source checks,
+   builds the four declared platform binaries, verifies their version, generates
+   `SHA256SUMS`, uploads a workflow artifact, and creates a Draft GitHub Release
+   with the same immutable assets.
+8. Complete the Draft Release notes. Mark an Alpha as a prerelease and list
+   completed and incomplete requirements, then publish the Release.
+9. Install from only the published assets and run the documented core flow on
    every platform declared by the release.
+
+The workflow may also be run manually against a branch. A manual run builds and
+uploads the workflow artifact but does not create a GitHub Release. Do not create
+a Release for a tag before its workflow runs; an existing Release makes the
+single release path fail explicitly.
 
 Do not create a stable `v0.1.0` release until the installable artifacts complete
 the Codex submission, cross-device discovery, and session-reading flow on more
@@ -51,3 +60,6 @@ published asset with different bytes under the same name. If a release is bad,
 mark it as affected in the Release notes, restore the last known good version in
 affected environments, fix the issue on a new branch, and publish the next Alpha
 or patch version. Each replacement artifact receives a new version and checksum.
+If the tag-triggered workflow fails, keep that tag immutable, fix the cause, and
+prepare the next Alpha or patch version instead of rerunning a changed build for
+the same version.
