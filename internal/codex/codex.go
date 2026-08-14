@@ -52,21 +52,29 @@ type ParsedChunk struct {
 	LastActivity string
 }
 
-func Discover(root string) ([]Source, error) {
+func Discover(root string, includeArchived bool) ([]Source, error) {
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		return nil, fmt.Errorf("codex directory %s is not accessible", root)
 	}
 	byID := make(map[string]Source)
 	foundRoot := false
-	for _, subdir := range []string{"sessions", "archived_sessions"} {
+	subdirs := []string{"sessions"}
+	if includeArchived {
+		subdirs = append(subdirs, "archived_sessions")
+	}
+	for _, subdir := range subdirs {
 		dir := filepath.Join(root, subdir)
-		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		info, err := os.Stat(dir)
+		if errors.Is(err, os.ErrNotExist) {
 			continue
 		} else if err != nil {
 			return nil, err
 		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("configured Codex source %s is not a directory", dir)
+		}
 		foundRoot = true
-		err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		err = filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -94,7 +102,7 @@ func Discover(root string) ([]Source, error) {
 		}
 	}
 	if !foundRoot {
-		return nil, fmt.Errorf("neither sessions nor archived_sessions exists under %s", root)
+		return nil, fmt.Errorf("no configured Codex session directory exists under %s", root)
 	}
 	sources := make([]Source, 0, len(byID))
 	for _, source := range byID {
@@ -306,12 +314,12 @@ func parseSessionMeta(line []byte) (Metadata, error) {
 	var envelope struct {
 		Type    string `json:"type"`
 		Payload struct {
-			ID           string `json:"id"`
-			SessionID    string `json:"session_id"`
-			Timestamp    string `json:"timestamp"`
-			CWD          string `json:"cwd"`
-			ForkedFromID string `json:"forked_from_id"`
-			Source       string `json:"source"`
+			ID           string        `json:"id"`
+			SessionID    string        `json:"session_id"`
+			Timestamp    string        `json:"timestamp"`
+			CWD          string        `json:"cwd"`
+			ForkedFromID string        `json:"forked_from_id"`
+			Source       sessionSource `json:"source"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(line), &envelope); err != nil {
@@ -327,7 +335,37 @@ func parseSessionMeta(line []byte) (Metadata, error) {
 	if !uuidPattern.MatchString(id) {
 		return Metadata{}, errors.New("session_meta has no valid session ID")
 	}
-	return Metadata{SessionID: id, StartedAt: envelope.Payload.Timestamp, CWD: envelope.Payload.CWD, ForkedFromID: envelope.Payload.ForkedFromID, Source: envelope.Payload.Source}, nil
+	return Metadata{SessionID: id, StartedAt: envelope.Payload.Timestamp, CWD: envelope.Payload.CWD, ForkedFromID: envelope.Payload.ForkedFromID, Source: string(envelope.Payload.Source)}, nil
+}
+
+type sessionSource string
+
+func (s *sessionSource) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return errors.New("session_meta source is empty")
+	}
+	if data[0] == '"' {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		*s = sessionSource(value)
+		return nil
+	}
+	if data[0] == '{' {
+		var value map[string]json.RawMessage
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, data); err != nil {
+			return err
+		}
+		*s = sessionSource(compact.String())
+		return nil
+	}
+	return errors.New("session_meta source must be a string or object")
 }
 
 func readLine(reader *bufio.Reader) ([]byte, bool, error) {

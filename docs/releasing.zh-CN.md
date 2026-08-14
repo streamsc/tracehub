@@ -51,11 +51,11 @@ Release。标签工作流运行前不得手工创建对应 Release；如果 Rele
 `v` 的等价标签。两个名称指向同一个不可变多平台镜像。Alpha 发布永不更新
 `latest`。
 
-工作流会在创建 Draft Release 前将关联的 `tracehub` 容器包设为公开。发布验证
-必须确认匿名拉取可用：
+在 GHCR 设置中将关联的 `tracehub` 容器包保持为公开。工作流会在创建 Draft
+Release 前验证匿名访问；发布验证还必须独立确认匿名拉取可用：
 
 ```bash
-docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.3
+docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
 ```
 
 在可安装产物尚未于多台设备完成 Codex 会话提交、跨设备发现和会话读取流程前，

@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Current version: `v0.1.0-alpha.4`.
+Current version: `v0.1.0-alpha.5`.
 
 TraceHub is a private, single-user session hub for AI agents across multiple
 devices. The first release reads local Codex JSONL files, incrementally uploads
@@ -13,7 +13,7 @@ stdio MCP server.
 ## Data flow
 
 ```text
-~/.codex/{sessions,archived_sessions}
+~/.codex/sessions (+ archived_sessions when enabled)
   -> tracehub sync
   -> complete JSONL lines / gzip / age X25519
   -> HTTPS / Ed25519 request signature
@@ -68,9 +68,11 @@ The server `server_private_keys` field is a keyring capable of decrypting old
 archives. Clients encrypt new chunks only with the public key selected by
 `server_key_id`.
 
-`codex_dir` points to the Codex root, normally `~/.codex`. TraceHub scans
-`sessions` and `archived_sessions`, rejecting symlinks, duplicate sessions,
-file/session UUID mismatches, and truncated source histories.
+`codex_dir` points to the Codex root, normally `~/.codex`.
+`include_archived_sessions` defaults to `false`, so TraceHub scans only
+`sessions`; set it to `true` to additionally scan `archived_sessions`. Discovery
+rejects symlinks, duplicates within the configured sources, file/session UUID
+mismatches, and truncated source histories.
 
 ## Server
 
@@ -89,7 +91,7 @@ The systemd unit is `deploy/systemd/tracehub.service`.
 Pull the published Linux amd64/arm64 image:
 
 ```bash
-docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.4
+docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
 ```
 
 Or build it from source:
@@ -97,7 +99,7 @@ Or build it from source:
 ```bash
 docker build \
   -f deploy/docker/Dockerfile \
-  -t tracehub:0.1.0-alpha.4 \
+  -t tracehub:0.1.0-alpha.5 \
   .
 
 cd deploy/docker
@@ -119,7 +121,7 @@ docker run -d \
   --health-interval 30s \
   --health-timeout 5s \
   --health-retries 3 \
-  ghcr.io/streamsc/tracehub:v0.1.0-alpha.4
+  ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
 ```
 
 ### Docker Compose

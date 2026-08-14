@@ -15,6 +15,25 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Removed
 
+## [0.1.0-alpha.5] - 2026-08-15
+
+### Changed
+
+- Codex archive discovery is opt-in through `include_archived_sessions`; the
+  default sync source is now only `sessions`.
+
+### Fixed
+
+- Codex `session_meta.payload.source` now accepts both the existing string form
+  and object-shaped subagent metadata while rejecting other JSON types.
+
+## [0.1.0-alpha.4] - 2026-08-14
+
+### Fixed
+
+- GHCR release verification now checks anonymous access without attempting an
+  unsupported package-visibility API call.
+
 ## [0.1.0-alpha.3] - 2026-08-14
 
 ### Added

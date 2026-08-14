@@ -10,13 +10,14 @@ import (
 )
 
 type Client struct {
-	DeviceID         string `json:"device_id"`
-	ServerURL        string `json:"server_url"`
-	CodexDir         string `json:"codex_dir"`
-	DeviceKeyID      string `json:"device_key_id"`
-	DevicePrivateKey string `json:"device_private_key"`
-	ServerKeyID      string `json:"server_key_id"`
-	ServerPublicKey  string `json:"server_public_key"`
+	DeviceID                string `json:"device_id"`
+	ServerURL               string `json:"server_url"`
+	CodexDir                string `json:"codex_dir"`
+	IncludeArchivedSessions bool   `json:"include_archived_sessions"`
+	DeviceKeyID             string `json:"device_key_id"`
+	DevicePrivateKey        string `json:"device_private_key"`
+	ServerKeyID             string `json:"server_key_id"`
+	ServerPublicKey         string `json:"server_public_key"`
 }
 
 type Device struct {
