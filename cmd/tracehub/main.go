@@ -69,7 +69,7 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		result, err := syncer.Run(ctx, cfg.CodexDir, remote, os.Stdout)
+		result, err := syncer.Run(ctx, cfg.CodexDir, cfg.IncludeArchivedSessions, remote, os.Stdout)
 		if err != nil {
 			return err
 		}

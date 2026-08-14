@@ -2,14 +2,14 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-当前版本：`v0.1.0-alpha.3`。
+当前版本：`v0.1.0-alpha.5`。
 
 TraceHub 是一个单用户、多设备的私有 AI Agent 会话中心。第一版读取 Codex 本地 JSONL，会话原文经 gzip 和 age 加密后增量上传，服务端使用 SQLite 保存不可变密文和可搜索的派生索引，再通过本地 stdio MCP 供 Codex 查询。
 
 ## 数据流
 
 ```text
-~/.codex/{sessions,archived_sessions}
+~/.codex/sessions（启用后再包含 archived_sessions）
   -> tracehub sync
   -> 完整 JSONL 行 / gzip / age X25519
   -> HTTPS / Ed25519 请求签名
@@ -67,7 +67,10 @@ tracehub keygen device \
 
 服务端配置中的 `server_private_keys` 是可解密历史归档的 keyring。客户端只使用 `server_key_id` 指定的公钥加密新分块。
 
-客户端的 `codex_dir` 指向 Codex 根目录，默认示例为 `~/.codex`。TraceHub 会扫描其中的 `sessions` 和 `archived_sessions`，拒绝符号链接、重复会话、文件 UUID 不匹配及被截断的会话。
+客户端的 `codex_dir` 指向 Codex 根目录，默认示例为 `~/.codex`。
+`include_archived_sessions` 默认是 `false`，因此 TraceHub 只扫描 `sessions`；
+设为 `true` 时才额外扫描 `archived_sessions`。发现过程会拒绝符号链接、配置来源内
+的重复会话、文件 UUID 不匹配及被截断的会话。
 
 ## 运行服务
 
@@ -86,7 +89,7 @@ systemd 单元位于 `deploy/systemd/tracehub.service`。
 拉取已发布的 Linux amd64/arm64 镜像：
 
 ```bash
-docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.3
+docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
 ```
 
 也可以从仓库根目录构建镜像：
@@ -94,7 +97,7 @@ docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.3
 ```bash
 docker build \
   -f deploy/docker/Dockerfile \
-  -t tracehub:0.1.0-alpha.3 \
+  -t tracehub:0.1.0-alpha.5 \
   .
 ```
 
@@ -124,7 +127,7 @@ docker run -d \
   --health-interval 30s \
   --health-timeout 5s \
   --health-retries 3 \
-  ghcr.io/streamsc/tracehub:v0.1.0-alpha.3
+  ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
 ```
 
 ### Docker Compose 部署

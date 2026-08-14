@@ -17,8 +17,8 @@ type Result struct {
 	Bytes    int64
 }
 
-func Run(ctx context.Context, codexDir string, remote *client.Client, output io.Writer) (Result, error) {
-	sources, err := codex.Discover(codexDir)
+func Run(ctx context.Context, codexDir string, includeArchived bool, remote *client.Client, output io.Writer) (Result, error) {
+	sources, err := codex.Discover(codexDir, includeArchived)
 	if err != nil {
 		return Result{}, err
 	}

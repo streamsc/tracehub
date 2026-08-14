@@ -11,9 +11,14 @@ import (
 )
 
 const testSessionID = "019ffdf2-452e-7c60-bd5d-4d88b56ef31b"
+const secondSessionID = "019ffdf2-452e-7c60-bd5d-4d88b56ef32b"
 
 func sessionLine(id string) string {
-	return fmt.Sprintf("{\"timestamp\":\"2026-08-14T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":%q,\"timestamp\":\"2026-08-14T01:00:00Z\",\"cwd\":\"/work\",\"forked_from_id\":\"parent\",\"source\":\"cli\"}}\n", id)
+	return sessionLineWithSource(id, `"cli"`)
+}
+
+func sessionLineWithSource(id, source string) string {
+	return fmt.Sprintf("{\"timestamp\":\"2026-08-14T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":%q,\"timestamp\":\"2026-08-14T01:00:00Z\",\"cwd\":\"/work\",\"forked_from_id\":\"parent\",\"source\":%s}}\n", id, source)
 }
 
 func TestInspectParseAndIgnoreDuplicates(t *testing.T) {
@@ -35,7 +40,7 @@ func TestInspectParseAndIgnoreDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.SessionID != testSessionID || source.CWD != "/work" {
+	if source.SessionID != testSessionID || source.CWD != "/work" || source.Source != "cli" {
 		t.Fatalf("unexpected source: %+v", source)
 	}
 	parsed, err := ParseChunk([]byte(content), 0, testSessionID)
@@ -48,6 +53,90 @@ func TestInspectParseAndIgnoreDuplicates(t *testing.T) {
 	if parsed.Events[0].Kind != "user_message" || parsed.Events[1].Kind != "agent_message" || parsed.Events[2].Kind != "tool_output" {
 		t.Fatalf("unexpected events: %+v", parsed.Events)
 	}
+}
+
+func TestSessionMetaSourceShapes(t *testing.T) {
+	objectLine := sessionLineWithSource(testSessionID, `{ "subagent": "review" }`)
+	meta, err := parseSessionMeta([]byte(objectLine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Source != `{"subagent":"review"}` {
+		t.Fatalf("object source was not compacted: %q", meta.Source)
+	}
+	stringMeta, err := parseSessionMeta([]byte(sessionLine(testSessionID)))
+	if err != nil || stringMeta.Source != "cli" {
+		t.Fatalf("string source changed: %+v err=%v", stringMeta, err)
+	}
+	for _, source := range []string{"null", "[]", "1", "true", `{"subagent":`} {
+		t.Run(source, func(t *testing.T) {
+			if _, err := parseSessionMeta([]byte(sessionLineWithSource(testSessionID, source))); err == nil {
+				t.Fatalf("invalid source %s was accepted", source)
+			}
+		})
+	}
+}
+
+func TestDiscoverConfiguredSources(t *testing.T) {
+	t.Run("sessions only", func(t *testing.T) {
+		root := t.TempDir()
+		writeCodexSession(t, root, "sessions", testSessionID)
+		writeCodexSession(t, root, "archived_sessions", secondSessionID)
+		sources, err := Discover(root, false)
+		if err != nil || len(sources) != 1 || sources[0].SessionID != testSessionID {
+			t.Fatalf("unexpected discovery: %+v err=%v", sources, err)
+		}
+	})
+
+	t.Run("explicit archives", func(t *testing.T) {
+		root := t.TempDir()
+		writeCodexSession(t, root, "sessions", testSessionID)
+		writeCodexSession(t, root, "archived_sessions", secondSessionID)
+		sources, err := Discover(root, true)
+		if err != nil || len(sources) != 2 {
+			t.Fatalf("unexpected discovery: %+v err=%v", sources, err)
+		}
+	})
+
+	t.Run("missing directories", func(t *testing.T) {
+		root := t.TempDir()
+		if _, err := Discover(root, false); err == nil {
+			t.Fatal("missing sessions directory was accepted")
+		}
+		writeCodexSession(t, root, "archived_sessions", secondSessionID)
+		if _, err := Discover(root, false); err == nil {
+			t.Fatal("excluded archive directory satisfied discovery")
+		}
+		sources, err := Discover(root, true)
+		if err != nil || len(sources) != 1 || sources[0].SessionID != secondSessionID {
+			t.Fatalf("included archive directory was not discovered: %+v err=%v", sources, err)
+		}
+	})
+
+	t.Run("duplicate boundary", func(t *testing.T) {
+		root := t.TempDir()
+		writeCodexSession(t, root, "sessions", testSessionID)
+		writeCodexSession(t, root, "archived_sessions", testSessionID)
+		if sources, err := Discover(root, false); err != nil || len(sources) != 1 {
+			t.Fatalf("excluded duplicate blocked discovery: %+v err=%v", sources, err)
+		}
+		if _, err := Discover(root, true); err == nil || !strings.Contains(err.Error(), "duplicate Codex session") {
+			t.Fatalf("included duplicate was not rejected: %v", err)
+		}
+	})
+}
+
+func writeCodexSession(t *testing.T, root, subdir, id string) string {
+	t.Helper()
+	dir := filepath.Join(root, subdir, "2026", "08", "14")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rollout-2026-08-14T09-00-00-"+id+".jsonl")
+	if err := os.WriteFile(path, []byte(sessionLine(id)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestReadChunksLeavesPartialLine(t *testing.T) {

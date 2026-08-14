@@ -61,12 +61,12 @@ Tag-triggered releases publish `ghcr.io/streamsc/tracehub:vX.Y.Z[-alpha.N]` and
 the equivalent tag without the leading `v`. Both names identify the same
 immutable multi-platform image. Alpha releases never update `latest`.
 
-The workflow changes the linked `tracehub` container package to public before
-creating the Draft Release. Confirm anonymous pull access as part of release
-verification:
+Keep the linked `tracehub` container package public in GHCR settings. The
+workflow verifies anonymous access before creating the Draft Release. Confirm
+anonymous pull access independently as part of release verification:
 
 ```bash
-docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.3
+docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
 ```
 
 Do not create a stable `v0.1.0` release until the installable artifacts complete

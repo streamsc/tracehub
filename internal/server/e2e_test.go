@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 )
 
 const e2eSessionID = "019ffdf2-452e-7c60-bd5d-4d88b56ef31b"
+const archivedSessionID = "019ffdf2-452e-7c60-bd5d-4d88b56ef32b"
 
 func TestTwoDeviceEndToEndAndMCP(t *testing.T) {
 	ctx := context.Background()
@@ -69,13 +71,28 @@ func TestTwoDeviceEndToEndAndMCP(t *testing.T) {
 	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	archivedDir := filepath.Join(codexDir, "archived_sessions")
+	if err := os.MkdirAll(archivedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	archivedPath := filepath.Join(archivedDir, "rollout-2026-08-14T09-00-00-"+archivedSessionID+".jsonl")
+	if err := os.WriteFile(archivedPath, []byte(syntheticSession(archivedSessionID)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	deviceA := newRemote(t, config.Client{DeviceID: "device-a", ServerURL: httpServer.URL, CodexDir: codexDir, DeviceKeyID: "a-1", DevicePrivateKey: deviceAPrivate, ServerKeyID: "server-1", ServerPublicKey: serverPublic})
 	deviceB := newRemote(t, config.Client{DeviceID: "device-b", ServerURL: httpServer.URL, CodexDir: codexDir, DeviceKeyID: "b-1", DevicePrivateKey: deviceBPrivate, ServerKeyID: "server-1", ServerPublicKey: serverPublic})
-	result, err := syncer.Run(ctx, codexDir, deviceA, io.Discard)
+	var syncOutput bytes.Buffer
+	result, err := syncer.Run(ctx, codexDir, false, deviceA, &syncOutput)
 	if err != nil || result.Sessions != 1 || result.Chunks != 1 {
 		t.Fatalf("initial sync: %+v err=%v", result, err)
 	}
-	result, err = syncer.Run(ctx, codexDir, deviceA, io.Discard)
+	if !strings.Contains(syncOutput.String(), e2eSessionID) || strings.Contains(syncOutput.String(), archivedSessionID) {
+		t.Fatalf("sync output included a disallowed source: %s", syncOutput.String())
+	}
+	if _, err := deviceB.Session(ctx, "device-a", codex.AgentType, archivedSessionID); err == nil {
+		t.Fatal("excluded archived session was uploaded")
+	}
+	result, err = syncer.Run(ctx, codexDir, false, deviceA, io.Discard)
 	if err != nil || result.Chunks != 0 {
 		t.Fatalf("idempotent sync: %+v err=%v", result, err)
 	}
@@ -122,13 +139,13 @@ func TestTwoDeviceEndToEndAndMCP(t *testing.T) {
 	}
 
 	appendFile(t, sessionPath, "{\"timestamp\":\"2026-08-14T01:06:00Z\",\"type\":\"event_msg\",\"payload\":")
-	result, err = syncer.Run(ctx, codexDir, deviceA, io.Discard)
+	result, err = syncer.Run(ctx, codexDir, false, deviceA, io.Discard)
 	if err != nil || result.Chunks != 0 {
 		t.Fatalf("partial-line sync: %+v err=%v", result, err)
 	}
 	appendFile(t, sessionPath, "{\"type\":\"agent_message\",\"message\":\"later\",\"phase\":\"final\"}}\n")
 	content += "{\"timestamp\":\"2026-08-14T01:06:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"later\",\"phase\":\"final\"}}\n"
-	result, err = syncer.Run(ctx, codexDir, deviceA, io.Discard)
+	result, err = syncer.Run(ctx, codexDir, false, deviceA, io.Discard)
 	if err != nil || result.Chunks != 1 {
 		t.Fatalf("append sync: %+v err=%v", result, err)
 	}
