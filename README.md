@@ -114,9 +114,6 @@ docker run -d \
   tracehub:0.1.0-alpha.1
 ```
 
-The Dockerfile pulls official Docker Hub base images through
-`mtw6hbbpueh4iz.xuanyuan.run`.
-
 ### Docker Compose
 
 ```bash

@@ -85,8 +85,6 @@ systemd 单元位于 `deploy/systemd/tracehub.service`。
 
 从仓库根目录构建镜像：
 
-Dockerfile 通过 `mtw6hbbpueh4iz.xuanyuan.run` 拉取 Docker Hub 官方基础镜像。
-
 ```bash
 docker build \
   -f deploy/docker/Dockerfile \
