@@ -159,7 +159,7 @@ func testMCP(t *testing.T, remote *client.Client) {
 		t.Fatal(err)
 	}
 	defer serverSession.Close()
-	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "tracehub-test", Version: "0.1.0-alpha.1"}, nil)
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "tracehub-test", Version: "0.1.0-alpha.2"}, nil)
 	clientSession, err := mcpClient.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		t.Fatal(err)

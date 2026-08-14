@@ -15,6 +15,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Removed
 
+## [0.1.0-alpha.2] - 2026-08-14
+
+### Changed
+
+- Docker builds now use the official Docker Hub base image names directly and
+  no longer reference a maintainer-owned registry proxy.
+
 ## [0.1.0-alpha.1] - 2026-08-14
 
 ### Added
