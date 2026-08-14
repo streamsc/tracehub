@@ -133,12 +133,10 @@ jobs:
       - name: Verify public container image
         if: github.ref_type == 'tag'
         env:
-          GH_TOKEN: ${{ github.token }}
           IMAGE: ${{ steps.version.outputs.image }}
           IMAGE_DIGEST: ${{ steps.container.outputs.digest }}
         run: |
           set -euo pipefail
-          gh api --method PATCH '/user/packages/container/tracehub' -f visibility=public
           docker logout ghcr.io
           docker buildx imagetools inspect "${IMAGE}@${IMAGE_DIGEST}"
 
