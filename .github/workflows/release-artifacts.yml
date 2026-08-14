@@ -17,9 +17,10 @@ jobs:
   build:
     name: Build release artifacts
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: write
+      packages: write
     defaults:
       run:
         shell: bash
@@ -56,6 +57,7 @@ jobs:
             fi
           fi
           echo "version=${source_version}" >> "${GITHUB_OUTPUT}"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "${GITHUB_OUTPUT}"
 
       - name: Check source
         run: make check
@@ -89,10 +91,62 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+      - name: Set up QEMU
+        if: github.ref_type == 'tag'
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        if: github.ref_type == 'tag'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push container image
+        if: github.ref_type == 'tag'
+        id: container
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.version.outputs.image }}:${{ github.ref_name }}
+            ${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Verify public container image
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.version.outputs.image }}
+          IMAGE_DIGEST: ${{ steps.container.outputs.digest }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH '/user/packages/container/tracehub' -f visibility=public
+          docker logout ghcr.io
+          docker buildx imagetools inspect "${IMAGE}@${IMAGE_DIGEST}"
+
       - name: Create draft GitHub Release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.version.outputs.image }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
@@ -100,13 +154,14 @@ jobs:
           if [[ "${VERSION}" == *-alpha.* ]]; then
             prerelease+=(--prerelease)
           fi
+          notes="$(printf 'Automated draft with verified release artifacts. Container image: `%s:%s`. Complete the requirement status and verification notes before publishing.' "${IMAGE}" "${GITHUB_REF_NAME}")"
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --draft \
             "${prerelease[@]}" \
             --title "TraceHub ${GITHUB_REF_NAME}" \
-            --notes "Automated draft with verified release artifacts. Complete the requirement status and verification notes before publishing." \
+            --notes "${notes}" \
             dist/tracehub-darwin-amd64 \
             dist/tracehub-darwin-arm64 \
             dist/tracehub-linux-amd64 \

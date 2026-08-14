@@ -31,15 +31,29 @@ Request 必须更新 Unreleased 中相应分类。不影响用户的内部变更
 6. 在合并后的 `main` 提交上创建并推送 annotated tag。标签必须与
    `tracehub version` 输出的版本完全一致。
 7. 等待 Release artifacts 工作流通过。该工作流执行源码检查、构建四个声明平台
-   的二进制、验证程序版本、生成 `SHA256SUMS`、上传工作流制品，并使用相同的
-   不可变资产创建 Draft GitHub Release。
+   的二进制、验证程序版本、生成 `SHA256SUMS`、上传工作流制品、向 GHCR 发布
+   公开的 Linux amd64/arm64 镜像，并使用相同的不可变二进制资产创建 Draft
+   GitHub Release。
 8. 完善 Draft Release 正文。Alpha 必须标记为 prerelease，并列出已完成和未完成
    需求，然后发布 Release。
 9. 在发布声明的每个平台上，仅使用已发布资产进行安装并运行文档中的核心流程。
 
-工作流也可以针对分支手动运行。手动运行只构建并上传工作流制品，不创建 GitHub
-Release。标签工作流运行前不得手工创建对应 Release；如果 Release 已存在，唯一
-发布路径会明确失败。
+工作流也可以针对分支手动运行。手动运行只构建并上传工作流制品，不发布容器镜像，
+也不创建 GitHub Release。标签工作流运行前不得手工创建对应 Release；如果
+Release 已存在，唯一发布路径会明确失败。
+
+## 容器镜像
+
+标签触发的发布会生成 `ghcr.io/streamsc/tracehub:vX.Y.Z[-alpha.N]` 以及不带前导
+`v` 的等价标签。两个名称指向同一个不可变多平台镜像。Alpha 发布永不更新
+`latest`。
+
+工作流会在创建 Draft Release 前将关联的 `tracehub` 容器包设为公开。发布验证
+必须确认匿名拉取可用：
+
+```bash
+docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.3
+```
 
 在可安装产物尚未于多台设备完成 Codex 会话提交、跨设备发现和会话读取流程前，
 不得发布稳定版 `v0.1.0`。

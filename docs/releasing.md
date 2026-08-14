@@ -37,17 +37,32 @@ Internal changes that do not affect users do not require an entry.
    exactly match the version reported by `tracehub version`.
 7. Wait for the Release artifacts workflow to pass. It runs source checks,
    builds the four declared platform binaries, verifies their version, generates
-   `SHA256SUMS`, uploads a workflow artifact, and creates a Draft GitHub Release
-   with the same immutable assets.
+   `SHA256SUMS`, uploads a workflow artifact, publishes a public Linux amd64/arm64
+   image to GHCR, and creates a Draft GitHub Release with the same immutable
+   binary assets.
 8. Complete the Draft Release notes. Mark an Alpha as a prerelease and list
    completed and incomplete requirements, then publish the Release.
 9. Install from only the published assets and run the documented core flow on
    every platform declared by the release.
 
 The workflow may also be run manually against a branch. A manual run builds and
-uploads the workflow artifact but does not create a GitHub Release. Do not create
-a Release for a tag before its workflow runs; an existing Release makes the
-single release path fail explicitly.
+uploads the workflow artifact but does not publish a container image or create a
+GitHub Release. Do not create a Release for a tag before its workflow runs; an
+existing Release makes the single release path fail explicitly.
+
+## Container images
+
+Tag-triggered releases publish `ghcr.io/streamsc/tracehub:vX.Y.Z[-alpha.N]` and
+the equivalent tag without the leading `v`. Both names identify the same
+immutable multi-platform image. Alpha releases never update `latest`.
+
+The workflow changes the linked `tracehub` container package to public before
+creating the Draft Release. Confirm anonymous pull access as part of release
+verification:
+
+```bash
+docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.3
+```
 
 Do not create a stable `v0.1.0` release until the installable artifacts complete
 the Codex submission, cross-device discovery, and session-reading flow on more
