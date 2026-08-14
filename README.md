@@ -20,3 +20,12 @@ Early development.
 - `sync`: local session discovery and incremental upload
 - `mcp`: authorized session search and retrieval
 - `adapters/codex`: Codex JSONL parsing
+
+## Project governance
+
+- [Contributing](CONTRIBUTING.md)
+- [Requirements](docs/requirements/README.md)
+- [Release management](docs/releasing.md)
+- [Changelog](CHANGELOG.md)
+
+This project is licensed under the [Apache License 2.0](LICENSE).

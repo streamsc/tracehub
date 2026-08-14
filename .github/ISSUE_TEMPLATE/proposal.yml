@@ -1,0 +1,36 @@
+name: Proposal
+description: Propose behavior that is not yet accepted into a version.
+title: "[Proposal]: "
+labels:
+  - type:proposal
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A proposal is not part of a release until the applicable requirement document is updated and accepted.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user problem without prescribing an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Desired behavior
+      description: Describe the user-observable outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Suggested acceptance criteria
+      description: List observable checks that would demonstrate completion.
+    validations:
+      required: true
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Out of scope
+      description: List nearby behavior that this proposal should not include.
