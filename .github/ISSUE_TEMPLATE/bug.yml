@@ -1,0 +1,45 @@
+name: Bug
+description: Report behavior that does not meet an accepted requirement or release.
+title: "[Bug]: "
+labels:
+  - type:bug
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Affected version
+      description: Enter a release tag, commit SHA, or Unreleased.
+      placeholder: v0.1.0-alpha.1
+    validations:
+      required: true
+  - type: input
+    id: requirement
+    attributes:
+      label: Related requirement
+      description: Enter a requirement ID when the behavior is covered by one.
+      placeholder: REQ-001
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest sequence that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Reference documented or accepted behavior when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add relevant logs or screenshots after removing credentials and private session content.

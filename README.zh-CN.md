@@ -21,3 +21,11 @@ MCP 提供经过授权的搜索与读取能力。
 - `mcp`：经过授权的会话搜索与读取接口
 - `adapters/codex`：Codex JSONL 解析适配器
 
+## 项目治理
+
+- [贡献指南](CONTRIBUTING.zh-CN.md)
+- [需求管理](docs/requirements/README.zh-CN.md)
+- [发布管理](docs/releasing.zh-CN.md)
+- [变更日志](CHANGELOG.md)
+
+本项目采用 [Apache License 2.0](LICENSE) 许可证。

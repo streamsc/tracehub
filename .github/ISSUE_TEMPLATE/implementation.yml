@@ -1,0 +1,48 @@
+name: Implementation
+description: Track an independently deliverable part of an accepted requirement.
+title: "[Implementation]: "
+labels:
+  - type:feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form only for an accepted requirement. Assign the target version Milestone before work starts.
+  - type: input
+    id: requirement
+    attributes:
+      label: Requirement ID
+      description: Enter the accepted requirement ID.
+      placeholder: REQ-001
+    validations:
+      required: true
+  - type: input
+    id: requirement_link
+    attributes:
+      label: Requirement link
+      description: Link to the exact requirement heading in the repository.
+    validations:
+      required: true
+  - type: textarea
+    id: deliverable
+    attributes:
+      label: Deliverable
+      description: Describe the independently deliverable behavior covered by this Issue.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance verification
+      description: List the requirement criteria covered and how they will be verified.
+    validations:
+      required: true
+  - type: dropdown
+    id: milestone_confirmation
+    attributes:
+      label: Milestone
+      description: Confirm that the Issue will be assigned to its target version Milestone.
+      options:
+        - I will assign the target version Milestone before implementation starts.
+    validations:
+      required: true
