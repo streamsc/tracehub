@@ -152,7 +152,8 @@ jobs:
           if [[ "${VERSION}" == *-alpha.* ]]; then
             prerelease+=(--prerelease)
           fi
-          # shellcheck disable=SC2016 -- backticks in the format string are literal Markdown.
+          # Backticks in the format string are literal Markdown.
+          # shellcheck disable=SC2016
           notes="$(printf 'Automated draft with verified release artifacts. Container image: `%s:%s`. Complete the requirement status and verification notes before publishing.' "${IMAGE}" "${GITHUB_REF_NAME}")"
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
