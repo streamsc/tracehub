@@ -18,5 +18,5 @@
 
 | 版本 | 状态 | 需求 |
 |---|---|---|
-| `v0.1.0` | Draft | [English](v0.1.0.md) · [简体中文](v0.1.0.zh-CN.md) |
+| `v0.1.0` | Accepted | [English](v0.1.0.md) · [简体中文](v0.1.0.zh-CN.md) |
 | `v0.1.1` | Draft | [English](v0.1.1.md) · [简体中文](v0.1.1.zh-CN.md) |
