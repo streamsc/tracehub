@@ -66,7 +66,7 @@ workflow verifies anonymous access before creating the Draft Release. Confirm
 anonymous pull access independently as part of release verification:
 
 ```bash
-docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
+docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.6
 ```
 
 Do not create a stable `v0.1.0` release until the installable artifacts complete

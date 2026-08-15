@@ -9,6 +9,16 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.1.0-alpha.6] - 2026-08-16
+
+### Added
+
 - Exact `repository_url` and `cwd` session filters derived from structured Codex
   Git metadata.
 - Resumable text offsets for reading a single message larger than the session
@@ -23,8 +33,6 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - Synchronization now rejects any rewrite of the already uploaded source prefix,
   including same-size changes that the previous offset-only plan could not see.
-
-### Removed
 
 ## [0.1.0-alpha.5] - 2026-08-15
 

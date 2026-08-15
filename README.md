@@ -4,7 +4,7 @@
 
 **Your AI work, across agents and platforms.**
 
-Current version: `v0.1.0-alpha.5`.
+Current version: `v0.1.0-alpha.6`.
 
 TraceHub is a private, single-user session hub for AI agents across multiple
 devices. The first release reads local Codex JSONL files, incrementally uploads
@@ -104,7 +104,7 @@ The systemd unit is `deploy/systemd/tracehub.service`.
 Pull the published Linux amd64/arm64 image:
 
 ```bash
-docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
+docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.6
 ```
 
 Or build it from source:
@@ -112,7 +112,7 @@ Or build it from source:
 ```bash
 docker build \
   -f deploy/docker/Dockerfile \
-  -t tracehub:0.1.0-alpha.5 \
+  -t tracehub:0.1.0-alpha.6 \
   .
 
 cd deploy/docker
@@ -134,7 +134,7 @@ docker run -d \
   --health-interval 30s \
   --health-timeout 5s \
   --health-retries 3 \
-  ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
+  ghcr.io/streamsc/tracehub:v0.1.0-alpha.6
 ```
 
 ### Docker Compose
