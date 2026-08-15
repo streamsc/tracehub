@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -66,7 +67,64 @@ func New(cfg config.Server) (*Server, error) {
 		db.Close()
 		return nil, errors.New("server has no enabled devices")
 	}
+	if err := s.backfillSessions(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("backfill stored sessions: %w", err)
+	}
 	return s, nil
+}
+
+func (s *Server) backfillSessions(ctx context.Context) error {
+	pending, err := s.store.PendingBackfills(ctx)
+	if err != nil {
+		return err
+	}
+	for _, session := range pending {
+		chunks, err := s.store.Chunks(ctx, session.DeviceID, session.AgentType, session.SessionID)
+		if err != nil {
+			return fmt.Errorf("load %s/%s: %w", session.DeviceID, session.SessionID, err)
+		}
+		hasher := sha256.New()
+		var expected int64
+		var metadata *codex.Metadata
+		for _, chunk := range chunks {
+			if chunk.StartOffset != expected {
+				return fmt.Errorf("session %s has archive offset gap: expected %d, got %d", session.SessionID, expected, chunk.StartOffset)
+			}
+			identity, ok := s.identities[chunk.ServerKeyID]
+			if !ok {
+				return fmt.Errorf("session %s requires missing server key %s", session.SessionID, chunk.ServerKeyID)
+			}
+			plain, err := archive.Decrypt(chunk.Ciphertext, identity, codex.MaxLine+codex.TargetChunk)
+			if err != nil {
+				return fmt.Errorf("decrypt session %s at %d: %w", session.SessionID, chunk.StartOffset, err)
+			}
+			sum := sha256.Sum256(plain)
+			if int64(len(plain)) != chunk.PlainSize || hex.EncodeToString(sum[:]) != chunk.PlainSHA256 {
+				return fmt.Errorf("session %s failed archive integrity at %d", session.SessionID, chunk.StartOffset)
+			}
+			parsed, err := codex.ParseChunk(plain, chunk.StartOffset, session.SessionID)
+			if err != nil {
+				return fmt.Errorf("parse session %s at %d: %w", session.SessionID, chunk.StartOffset, err)
+			}
+			if parsed.Metadata != nil {
+				metadata = parsed.Metadata
+			}
+			_, _ = hasher.Write(plain)
+			expected = chunk.EndOffset
+		}
+		if expected != session.NextOffset || metadata == nil {
+			return fmt.Errorf("session %s archive does not match stored offset or metadata", session.SessionID)
+		}
+		state, err := hasher.(encoding.BinaryMarshaler).MarshalBinary()
+		if err != nil {
+			return err
+		}
+		if err := s.store.FinishBackfill(ctx, session, state, *metadata); err != nil {
+			return fmt.Errorf("finish session %s backfill: %w", session.SessionID, err)
+		}
+	}
+	return nil
 }
 
 func (s *Server) Close() error { return s.store.Close() }
@@ -134,18 +192,20 @@ func (s *Server) handleSyncPlan(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, session.SessionID)
 		sizes[session.SessionID] = session.Size
 	}
-	offsets, err := s.store.NextOffsets(r.Context(), deviceID(r), request.AgentType, ids)
+	checkpoints, err := s.store.Checkpoints(r.Context(), deviceID(r), request.AgentType, ids)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	for id, offset := range offsets {
-		if offset > sizes[id] {
-			writeError(w, http.StatusConflict, fmt.Sprintf("session %s was truncated below server offset %d", id, offset))
+	response := make(map[string]api.SyncCheckpoint, len(checkpoints))
+	for id, checkpoint := range checkpoints {
+		if checkpoint.NextOffset > sizes[id] {
+			writeError(w, http.StatusConflict, fmt.Sprintf("session %s was truncated below server offset %d", id, checkpoint.NextOffset))
 			return
 		}
+		response[id] = api.SyncCheckpoint{NextOffset: checkpoint.NextOffset, PrefixSHA256: checkpoint.PrefixSHA256}
 	}
-	writeJSON(w, http.StatusOK, api.SyncPlanResponse{Offsets: offsets})
+	writeJSON(w, http.StatusOK, api.SyncPlanResponse{Sessions: response})
 }
 
 func (s *Server) handleChunk(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +229,11 @@ func (s *Server) handleChunk(w http.ResponseWriter, r *http.Request) {
 	plainHash := r.Header.Get(api.HeaderPlainSHA256)
 	if len(plainHash) != sha256.Size*2 {
 		writeError(w, http.StatusBadRequest, "invalid plaintext SHA-256")
+		return
+	}
+	prefixHash := r.Header.Get(api.HeaderPrefixSHA256)
+	if len(prefixHash) != sha256.Size*2 {
+		writeError(w, http.StatusBadRequest, "invalid prefix SHA-256")
 		return
 	}
 	keyID := r.Header.Get(api.HeaderServerKeyID)
@@ -201,7 +266,7 @@ func (s *Server) handleChunk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	duplicate, err := s.store.PutChunk(r.Context(), store.Chunk{DeviceID: deviceID(r), AgentType: agentType, SessionID: sessionID, StartOffset: start, EndOffset: end, ServerKeyID: keyID, PlainSHA256: strings.ToLower(plainHash), PlainSize: plainSize, Ciphertext: ciphertext}, parsed)
+	duplicate, err := s.store.PutChunk(r.Context(), store.Chunk{DeviceID: deviceID(r), AgentType: agentType, SessionID: sessionID, StartOffset: start, EndOffset: end, ServerKeyID: keyID, PlainSHA256: strings.ToLower(plainHash), PlainSize: plainSize, Ciphertext: ciphertext}, plain, strings.ToLower(prefixHash), parsed)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -246,14 +311,35 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	after, _ := strconv.ParseInt(r.URL.Query().Get("after_seq"), 10, 64)
+	after, err := parseOptionalInt64(r.URL.Query().Get("after_seq"))
+	if err != nil || after < 0 {
+		writeError(w, http.StatusBadRequest, "invalid after_seq")
+		return
+	}
+	textOffset64, err := parseOptionalInt64(r.URL.Query().Get("after_text_offset"))
+	if err != nil || textOffset64 < 0 || int64(int(textOffset64)) != textOffset64 {
+		writeError(w, http.StatusBadRequest, "invalid after_text_offset")
+		return
+	}
+	textOffset := int(textOffset64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	events, next, err := s.store.Events(r.Context(), r.PathValue("device"), r.PathValue("agent"), r.PathValue("session"), after, limit, api.MaxPageBytes)
+	events, next, nextTextOffset, err := s.store.Events(r.Context(), r.PathValue("device"), r.PathValue("agent"), r.PathValue("session"), after, textOffset, limit, api.MaxPageBytes)
 	if err != nil {
+		if errors.Is(err, store.ErrInvalidCursor) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, api.EventsResponse{UntrustedHistoricalData: true, Events: events, NextSeq: next})
+	writeJSON(w, http.StatusOK, api.EventsResponse{UntrustedHistoricalData: true, Events: events, NextSeq: next, NextTextOffset: nextTextOffset})
+}
+
+func parseOptionalInt64(value string) (int64, error) {
+	if value == "" {
+		return 0, nil
+	}
+	return strconv.ParseInt(value, 10, 64)
 }
 
 func (s *Server) handleToolOutput(w http.ResponseWriter, r *http.Request) {

@@ -26,23 +26,23 @@ func Run(ctx context.Context, codexDir string, includeArchived bool, remote *cli
 	for _, source := range sources {
 		manifest = append(manifest, api.LocalSession{SessionID: source.SessionID, Size: source.Size})
 	}
-	offsets, err := remote.Plan(ctx, manifest)
+	checkpoints, err := remote.Plan(ctx, manifest)
 	if err != nil {
 		return Result{}, err
 	}
 	var result Result
 	for _, source := range sources {
-		start, ok := offsets[source.SessionID]
+		checkpoint, ok := checkpoints[source.SessionID]
 		if !ok {
-			return result, fmt.Errorf("server omitted offset for session %s", source.SessionID)
+			return result, fmt.Errorf("server omitted checkpoint for session %s", source.SessionID)
 		}
 		before := result.Chunks
-		_, err := codex.ReadChunks(source.Path, start, func(chunkStart, chunkEnd int64, plain []byte) error {
+		_, err := codex.ReadChunks(source.Path, checkpoint.NextOffset, checkpoint.PrefixSHA256, func(chunkStart, chunkEnd int64, plain []byte, prefixHash string) error {
 			ciphertext, err := archive.Encrypt(plain, remote.Recipient())
 			if err != nil {
 				return err
 			}
-			response, err := remote.Upload(ctx, source.SessionID, chunkStart, chunkEnd, client.PlainSHA256(plain), int64(len(plain)), ciphertext)
+			response, err := remote.Upload(ctx, source.SessionID, chunkStart, chunkEnd, client.PlainSHA256(plain), prefixHash, int64(len(plain)), ciphertext)
 			if err != nil {
 				return err
 			}

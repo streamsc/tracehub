@@ -158,10 +158,16 @@ SQLite at `/var/lib/tracehub/tracehub.db`.
 tracehub sync --config ./client.json
 ```
 
-The server reports the authoritative byte offset for each session. The client
-uploads only newly appended, newline-terminated JSONL records. Normal chunks
-target 4 MiB, oversized records use a dedicated chunk, and a record larger than
-64 MiB is rejected. Repeating a sync is idempotent.
+The server reports the authoritative byte offset and prefix SHA-256 for each
+session. The client verifies every uploaded byte before it uploads only newly
+appended, newline-terminated JSONL records. A truncated or rewritten prefix fails
+explicitly. Normal chunks target 4 MiB, oversized records use a dedicated chunk,
+and a record larger than 64 MiB is rejected. Repeating a sync is idempotent.
+
+On the first start after upgrading from an earlier alpha, the server migrates
+SQLite in place and verifies stored ciphertext before rebuilding prefix
+checkpoints and structured Git metadata. The service does not listen until this
+one-time migration succeeds.
 
 ## Codex MCP
 
@@ -173,7 +179,11 @@ args = ["mcp", "--config", "/Users/you/.config/tracehub/client.json"]
 
 The MCP server provides `list_devices`, `search_sessions`, `get_session_info`,
 `read_session`, and `read_tool_output`. Archived content is explicitly marked as
-untrusted. Reasoning is never returned through MCP.
+untrusted. `search_sessions` supports exact, case-sensitive `repository_url` and
+`cwd` filters. `read_session` returns `next_seq` and `next_text_offset`; pass both
+back as `after_seq` and `after_text_offset` when `more_text` is true to continue
+an oversized message without losing content. Reasoning is never returned through
+MCP.
 
 ## Administration
 

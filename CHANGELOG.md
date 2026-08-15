@@ -9,9 +9,20 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- Exact `repository_url` and `cwd` session filters derived from structured Codex
+  Git metadata.
+- Resumable text offsets for reading a single message larger than the session
+  page budget without omitting content.
+
 ### Changed
 
+- Existing alpha databases are migrated in place at server startup, with stored
+  chunks verified before prefix checkpoints and Git metadata are backfilled.
+
 ### Fixed
+
+- Synchronization now rejects any rewrite of the already uploaded source prefix,
+  including same-size changes that the previous offset-only plan could not see.
 
 ### Removed
 

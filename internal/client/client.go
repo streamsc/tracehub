@@ -55,13 +55,13 @@ func New(cfg config.Client) (*Client, error) {
 
 func (c *Client) Recipient() age.Recipient { return c.recipient }
 
-func (c *Client) Plan(ctx context.Context, sessions []api.LocalSession) (map[string]int64, error) {
+func (c *Client) Plan(ctx context.Context, sessions []api.LocalSession) (map[string]api.SyncCheckpoint, error) {
 	var response api.SyncPlanResponse
 	err := c.doJSON(ctx, http.MethodPost, "/v1/sync/plan", api.SyncPlanRequest{AgentType: codex.AgentType, Sessions: sessions}, &response)
-	return response.Offsets, err
+	return response.Sessions, err
 }
 
-func (c *Client) Upload(ctx context.Context, sessionID string, start, end int64, plainHash string, plainSize int64, ciphertext []byte) (api.UploadResponse, error) {
+func (c *Client) Upload(ctx context.Context, sessionID string, start, end int64, plainHash, prefixHash string, plainSize int64, ciphertext []byte) (api.UploadResponse, error) {
 	path := fmt.Sprintf("/v1/sync/chunks/%s/%s/%d", codex.AgentType, url.PathEscape(sessionID), start)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.config.ServerURL+path, bytes.NewReader(ciphertext))
 	if err != nil {
@@ -72,6 +72,7 @@ func (c *Client) Upload(ctx context.Context, sessionID string, start, end int64,
 	req.Header.Set(api.HeaderPlainSHA256, plainHash)
 	req.Header.Set(api.HeaderPlainSize, strconv.FormatInt(plainSize, 10))
 	req.Header.Set(api.HeaderServerKeyID, c.config.ServerKeyID)
+	req.Header.Set(api.HeaderPrefixSHA256, prefixHash)
 	if err := auth.SignRequest(req, c.config.DeviceID, c.config.DeviceKeyID, c.private); err != nil {
 		return api.UploadResponse{}, err
 	}
@@ -99,9 +100,9 @@ func (c *Client) Session(ctx context.Context, deviceID, agentType, sessionID str
 	return response, err
 }
 
-func (c *Client) Events(ctx context.Context, deviceID, agentType, sessionID string, after int64, limit int) (api.EventsResponse, error) {
+func (c *Client) Events(ctx context.Context, deviceID, agentType, sessionID string, after int64, textOffset, limit int) (api.EventsResponse, error) {
 	var response api.EventsResponse
-	path := fmt.Sprintf("/v1/sessions/%s/%s/%s/events?after_seq=%d&limit=%d", url.PathEscape(deviceID), url.PathEscape(agentType), url.PathEscape(sessionID), after, limit)
+	path := fmt.Sprintf("/v1/sessions/%s/%s/%s/events?after_seq=%d&after_text_offset=%d&limit=%d", url.PathEscape(deviceID), url.PathEscape(agentType), url.PathEscape(sessionID), after, textOffset, limit)
 	err := c.doJSON(ctx, http.MethodGet, path, nil, &response)
 	return response, err
 }

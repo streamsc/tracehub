@@ -18,12 +18,14 @@ type Proxy struct {
 type ListDevicesInput struct{}
 
 type SearchSessionsInput struct {
-	DeviceID string `json:"device_id,omitempty" jsonschema:"logical device name to filter"`
-	Query    string `json:"query,omitempty" jsonschema:"exact text phrase to search in conversation and execution summaries"`
-	Start    string `json:"start,omitempty" jsonschema:"inclusive RFC3339 last-activity lower bound"`
-	End      string `json:"end,omitempty" jsonschema:"exclusive RFC3339 last-activity upper bound"`
-	AfterID  int64  `json:"after_id,omitempty" jsonschema:"session ID cursor from the previous page"`
-	Limit    int    `json:"limit,omitempty" jsonschema:"maximum sessions to return, from 1 to 100"`
+	DeviceID      string `json:"device_id,omitempty" jsonschema:"logical device name to filter"`
+	Query         string `json:"query,omitempty" jsonschema:"exact text phrase to search in conversation and execution summaries"`
+	RepositoryURL string `json:"repository_url,omitempty" jsonschema:"exact repository URL to filter"`
+	CWD           string `json:"cwd,omitempty" jsonschema:"exact working directory to filter"`
+	Start         string `json:"start,omitempty" jsonschema:"inclusive RFC3339 last-activity lower bound"`
+	End           string `json:"end,omitempty" jsonschema:"exclusive RFC3339 last-activity upper bound"`
+	AfterID       int64  `json:"after_id,omitempty" jsonschema:"session ID cursor from the previous page"`
+	Limit         int    `json:"limit,omitempty" jsonschema:"maximum sessions to return, from 1 to 100"`
 }
 
 type SessionInput struct {
@@ -33,11 +35,12 @@ type SessionInput struct {
 }
 
 type ReadSessionInput struct {
-	DeviceID  string `json:"device_id" jsonschema:"logical device name"`
-	AgentType string `json:"agent_type,omitempty" jsonschema:"agent adapter name; defaults to codex"`
-	SessionID string `json:"session_id" jsonschema:"session UUID"`
-	AfterSeq  int64  `json:"after_seq,omitempty" jsonschema:"event byte-offset cursor from the previous page"`
-	Limit     int    `json:"limit,omitempty" jsonschema:"maximum events to return, from 1 to 100"`
+	DeviceID        string `json:"device_id" jsonschema:"logical device name"`
+	AgentType       string `json:"agent_type,omitempty" jsonschema:"agent adapter name; defaults to codex"`
+	SessionID       string `json:"session_id" jsonschema:"session UUID"`
+	AfterSeq        int64  `json:"after_seq,omitempty" jsonschema:"event byte-offset cursor from the previous page"`
+	AfterTextOffset int    `json:"after_text_offset,omitempty" jsonschema:"byte offset within the event identified by after_seq"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"maximum events to return, from 1 to 100"`
 }
 
 type ToolOutputInput struct {
@@ -68,7 +71,7 @@ func (p *Proxy) listDevices(ctx context.Context, _ *mcp.CallToolRequest, _ ListD
 }
 
 func (p *Proxy) searchSessions(ctx context.Context, _ *mcp.CallToolRequest, input SearchSessionsInput) (*mcp.CallToolResult, api.SearchResponse, error) {
-	response, err := p.client.Search(ctx, store.SearchFilter{DeviceID: input.DeviceID, Query: input.Query, Start: input.Start, End: input.End, AfterID: input.AfterID, Limit: input.Limit})
+	response, err := p.client.Search(ctx, store.SearchFilter{DeviceID: input.DeviceID, Query: input.Query, RepositoryURL: input.RepositoryURL, CWD: input.CWD, Start: input.Start, End: input.End, AfterID: input.AfterID, Limit: input.Limit})
 	return nil, response, err
 }
 
@@ -78,7 +81,7 @@ func (p *Proxy) getSessionInfo(ctx context.Context, _ *mcp.CallToolRequest, inpu
 }
 
 func (p *Proxy) readSession(ctx context.Context, _ *mcp.CallToolRequest, input ReadSessionInput) (*mcp.CallToolResult, api.EventsResponse, error) {
-	response, err := p.client.Events(ctx, input.DeviceID, agent(input.AgentType), input.SessionID, input.AfterSeq, input.Limit)
+	response, err := p.client.Events(ctx, input.DeviceID, agent(input.AgentType), input.SessionID, input.AfterSeq, input.AfterTextOffset, input.Limit)
 	return nil, response, err
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"io"
 	"net/http"
 	"testing"
 )
@@ -36,5 +37,21 @@ func TestSignatureCoversMetadataAndBody(t *testing.T) {
 	req.Header.Set("X-TraceHub-Device", "server-a")
 	if err := VerifyRequest(req, publicKey); err == nil {
 		t.Fatal("changed device ID was accepted")
+	}
+	req, _ = http.NewRequest(http.MethodPost, "https://tracehub.test/v1/sync/plan", bytes.NewReader([]byte("body")))
+	if err := SignRequest(req, "desktop", "key-1", privateKey); err != nil {
+		t.Fatal(err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader([]byte("changed")))
+	if err := VerifyRequest(req, publicKey); err == nil {
+		t.Fatal("changed request body was accepted")
+	}
+	req, _ = http.NewRequest(http.MethodPost, "https://tracehub.test/v1/sync/plan", bytes.NewReader([]byte("body")))
+	if err := SignRequest(req, "desktop", "key-1", privateKey); err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set(HeaderKeyID, "key-2")
+	if err := VerifyRequest(req, publicKey); err == nil {
+		t.Fatal("changed key ID was accepted")
 	}
 }

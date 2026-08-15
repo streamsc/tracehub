@@ -164,7 +164,9 @@ docker compose up --build
 tracehub sync --config ./client.json
 ```
 
-客户端先向服务端查询每个会话的权威字节偏移，只上传之后新增且以换行结束的完整 JSONL。正常分块目标约 4 MiB；大记录独占分块；单条记录超过 64 MiB 时明确失败。重复执行不会重复保存已有分块。
+客户端先向服务端查询每个会话的权威字节偏移和前缀 SHA-256，验证所有已上传字节后，只上传之后新增且以换行结束的完整 JSONL。文件截短或已上传前缀被改写会明确失败。正常分块目标约 4 MiB；大记录独占分块；单条记录超过 64 MiB 时明确失败。重复执行不会重复保存已有分块。
+
+从更早的 alpha 首次升级启动时，服务端会原地迁移 SQLite，并在重建前缀 checkpoint 和结构化 Git 元数据前验证已有密文。一次性迁移成功之前服务不会开始监听。
 
 管理员删除云端会话后，若源设备仍保留该 JSONL，下一次同步会重新上传；需要永久排除时，应同时移走源文件。
 
@@ -178,7 +180,7 @@ command = "/usr/local/bin/tracehub"
 args = ["mcp", "--config", "/Users/you/.config/tracehub/client.json"]
 ```
 
-提供五个工具：`list_devices`、`search_sessions`、`get_session_info`、`read_session`、`read_tool_output`。所有历史内容均标记为不可信数据；`read_session` 单页最多 50 个事件或 256 KiB；`read_tool_output` 单次最多 256 KiB；reasoning 永不通过 MCP 返回。
+提供五个工具：`list_devices`、`search_sessions`、`get_session_info`、`read_session`、`read_tool_output`。`search_sessions` 支持区分大小写、精确匹配的 `repository_url` 和 `cwd` 筛选。所有历史内容均标记为不可信数据；`read_session` 单页最多 50 个事件或 256 KiB，`more_text` 为真时应将返回的 `next_seq` 和 `next_text_offset` 作为下一次的 `after_seq` 和 `after_text_offset`，以继续读取超大单条消息；`read_tool_output` 单次最多 256 KiB；reasoning 永不通过 MCP 返回。
 
 ## 管理
 

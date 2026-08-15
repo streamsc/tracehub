@@ -3,6 +3,7 @@ package codex
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,10 @@ func sessionLine(id string) string {
 
 func sessionLineWithSource(id, source string) string {
 	return fmt.Sprintf("{\"timestamp\":\"2026-08-14T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":%q,\"timestamp\":\"2026-08-14T01:00:00Z\",\"cwd\":\"/work\",\"forked_from_id\":\"parent\",\"source\":%s}}\n", id, source)
+}
+
+func sessionLineWithGit(id, git string) string {
+	return fmt.Sprintf("{\"timestamp\":\"2026-08-14T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":%q,\"timestamp\":\"2026-08-14T01:00:00Z\",\"cwd\":\"/work\",\"source\":\"cli\",\"git\":%s}}\n", id, git)
 }
 
 func TestInspectParseAndIgnoreDuplicates(t *testing.T) {
@@ -72,6 +77,28 @@ func TestSessionMetaSourceShapes(t *testing.T) {
 		t.Run(source, func(t *testing.T) {
 			if _, err := parseSessionMeta([]byte(sessionLineWithSource(testSessionID, source))); err == nil {
 				t.Fatalf("invalid source %s was accepted", source)
+			}
+		})
+	}
+}
+
+func TestSessionMetaGitShapes(t *testing.T) {
+	meta, err := parseSessionMeta([]byte(sessionLineWithGit(testSessionID, `{"repository_url":"ssh://git@example/repo.git","branch":"main","commit_hash":"abc123"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.RepositoryURL != "ssh://git@example/repo.git" || meta.GitBranch != "main" || meta.GitCommitHash != "abc123" {
+		t.Fatalf("unexpected Git metadata: %+v", meta)
+	}
+	for _, git := range []string{"null", `{"repository_url":"repo"}`} {
+		if _, err := parseSessionMeta([]byte(sessionLineWithGit(testSessionID, git))); err != nil {
+			t.Fatalf("valid Git shape %s failed: %v", git, err)
+		}
+	}
+	for _, git := range []string{`"repo"`, "[]", "1", "true", `{"repository_url":1}`, `{"repository_url":`} {
+		t.Run(git, func(t *testing.T) {
+			if _, err := parseSessionMeta([]byte(sessionLineWithGit(testSessionID, git))); err == nil {
+				t.Fatalf("invalid Git shape %s was accepted", git)
 			}
 		})
 	}
@@ -146,7 +173,8 @@ func TestReadChunksLeavesPartialLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []byte
-	offset, err := ReadChunks(path, 0, func(_, _ int64, plain []byte) error {
+	emptyHash := fmt.Sprintf("%x", sha256.Sum256(nil))
+	offset, err := ReadChunks(path, 0, emptyHash, func(_, _ int64, plain []byte, _ string) error {
 		got = append(got, plain...)
 		return nil
 	})
@@ -159,9 +187,38 @@ func TestReadChunksLeavesPartialLine(t *testing.T) {
 }
 
 func TestReadLineRejectsOver64MiB(t *testing.T) {
+	exact := bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", MaxLine-1)+"\n"), 64<<10)
+	line, complete, err := readLine(exact)
+	if err != nil || !complete || len(line) != MaxLine {
+		t.Fatalf("exact 64 MiB JSONL line failed: len=%d complete=%v err=%v", len(line), complete, err)
+	}
 	reader := bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", MaxLine+1)), 64<<10)
 	if _, _, err := readLine(reader); err == nil {
 		t.Fatal("oversized JSONL line was accepted")
+	}
+}
+
+func TestReadChunksRejectsRewrittenPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := sessionLine(testSessionID) + "{\"timestamp\":\"2026-08-14T01:01:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"hello\"}}\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	emptyHash := fmt.Sprintf("%x", sha256.Sum256(nil))
+	var checkpoint string
+	offset, err := ReadChunks(path, 0, emptyHash, func(_, _ int64, _ []byte, prefixSHA256 string) error {
+		checkpoint = prefixSHA256
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten := strings.Replace(content, "hello", "jello", 1)
+	if err := os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadChunks(path, offset, checkpoint, func(_, _ int64, _ []byte, _ string) error { return nil }); err == nil || !strings.Contains(err.Error(), "prefix was rewritten") {
+		t.Fatalf("rewritten prefix was not rejected: %v", err)
 	}
 }
 
@@ -174,7 +231,8 @@ func TestReadChunksAccepts15MiBRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sizes []int
-	_, err := ReadChunks(path, 0, func(_, _ int64, plain []byte) error {
+	emptyHash := fmt.Sprintf("%x", sha256.Sum256(nil))
+	_, err := ReadChunks(path, 0, emptyHash, func(_, _ int64, plain []byte, _ string) error {
 		sizes = append(sizes, len(plain))
 		return nil
 	})
