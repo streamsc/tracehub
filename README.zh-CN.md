@@ -4,7 +4,7 @@
 
 **让 AI 工作跨越 Agent 与平台。**
 
-当前版本：`v0.1.0-alpha.5`。
+当前版本：`v0.1.0-alpha.6`。
 
 TraceHub 是一个单用户、多设备的私有 AI Agent 会话中心。第一版读取 Codex 本地 JSONL，会话原文经 gzip 和 age 加密后增量上传，服务端使用 SQLite 保存不可变密文和可搜索的派生索引，再通过本地 stdio MCP 供 Codex 查询。
 
@@ -101,7 +101,7 @@ systemd 单元位于 `deploy/systemd/tracehub.service`。
 拉取已发布的 Linux amd64/arm64 镜像：
 
 ```bash
-docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
+docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.6
 ```
 
 也可以从仓库根目录构建镜像：
@@ -109,7 +109,7 @@ docker pull ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
 ```bash
 docker build \
   -f deploy/docker/Dockerfile \
-  -t tracehub:0.1.0-alpha.5 \
+  -t tracehub:0.1.0-alpha.6 \
   .
 ```
 
@@ -139,7 +139,7 @@ docker run -d \
   --health-interval 30s \
   --health-timeout 5s \
   --health-retries 3 \
-  ghcr.io/streamsc/tracehub:v0.1.0-alpha.5
+  ghcr.io/streamsc/tracehub:v0.1.0-alpha.6
 ```
 
 ### Docker Compose 部署
