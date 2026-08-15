@@ -3,6 +3,8 @@ package codex
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,11 +25,14 @@ const (
 var uuidPattern = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 
 type Metadata struct {
-	SessionID    string `json:"session_id"`
-	StartedAt    string `json:"started_at,omitempty"`
-	CWD          string `json:"cwd,omitempty"`
-	ForkedFromID string `json:"forked_from_id,omitempty"`
-	Source       string `json:"source,omitempty"`
+	SessionID     string `json:"session_id"`
+	StartedAt     string `json:"started_at,omitempty"`
+	CWD           string `json:"cwd,omitempty"`
+	ForkedFromID  string `json:"forked_from_id,omitempty"`
+	Source        string `json:"source,omitempty"`
+	RepositoryURL string `json:"repository_url,omitempty"`
+	GitBranch     string `json:"git_branch,omitempty"`
+	GitCommitHash string `json:"git_commit_hash,omitempty"`
 }
 
 type Source struct {
@@ -140,7 +145,7 @@ func Inspect(path string) (Source, error) {
 	return Source{Path: path, Size: info.Size(), Metadata: meta}, nil
 }
 
-func ReadChunks(path string, start int64, consume func(start, end int64, plain []byte) error) (int64, error) {
+func ReadChunks(path string, start int64, expectedPrefixSHA256 string, consume func(start, end int64, plain []byte, prefixSHA256 string) error) (int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return start, err
@@ -152,6 +157,14 @@ func ReadChunks(path string, start int64, consume func(start, end int64, plain [
 	}
 	if info.Size() < start {
 		return start, fmt.Errorf("source file was truncated: size %d is below server offset %d", info.Size(), start)
+	}
+	prefixHash := sha256.New()
+	if _, err := io.CopyN(prefixHash, file, start); err != nil {
+		return start, fmt.Errorf("hash source prefix: %w", err)
+	}
+	actualPrefixSHA256 := hex.EncodeToString(prefixHash.Sum(nil))
+	if !strings.EqualFold(actualPrefixSHA256, expectedPrefixSHA256) {
+		return start, fmt.Errorf("source file prefix was rewritten: SHA-256 %s does not match server checkpoint %s", actualPrefixSHA256, expectedPrefixSHA256)
 	}
 	if start > 0 {
 		if _, err := file.Seek(start-1, io.SeekStart); err != nil {
@@ -174,7 +187,11 @@ func ReadChunks(path string, start int64, consume func(start, end int64, plain [
 			return nil
 		}
 		copyOfChunk := append([]byte(nil), chunk...)
-		if err := consume(chunkStart, chunkStart+int64(len(copyOfChunk)), copyOfChunk); err != nil {
+		if _, err := prefixHash.Write(copyOfChunk); err != nil {
+			return err
+		}
+		cumulativeSHA256 := hex.EncodeToString(prefixHash.Sum(nil))
+		if err := consume(chunkStart, chunkStart+int64(len(copyOfChunk)), copyOfChunk, cumulativeSHA256); err != nil {
 			return err
 		}
 		chunkStart += int64(len(copyOfChunk))
@@ -320,6 +337,11 @@ func parseSessionMeta(line []byte) (Metadata, error) {
 			CWD          string        `json:"cwd"`
 			ForkedFromID string        `json:"forked_from_id"`
 			Source       sessionSource `json:"source"`
+			Git          *struct {
+				RepositoryURL string `json:"repository_url"`
+				Branch        string `json:"branch"`
+				CommitHash    string `json:"commit_hash"`
+			} `json:"git"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(line), &envelope); err != nil {
@@ -335,7 +357,13 @@ func parseSessionMeta(line []byte) (Metadata, error) {
 	if !uuidPattern.MatchString(id) {
 		return Metadata{}, errors.New("session_meta has no valid session ID")
 	}
-	return Metadata{SessionID: id, StartedAt: envelope.Payload.Timestamp, CWD: envelope.Payload.CWD, ForkedFromID: envelope.Payload.ForkedFromID, Source: string(envelope.Payload.Source)}, nil
+	meta := Metadata{SessionID: id, StartedAt: envelope.Payload.Timestamp, CWD: envelope.Payload.CWD, ForkedFromID: envelope.Payload.ForkedFromID, Source: string(envelope.Payload.Source)}
+	if envelope.Payload.Git != nil {
+		meta.RepositoryURL = envelope.Payload.Git.RepositoryURL
+		meta.GitBranch = envelope.Payload.Git.Branch
+		meta.GitCommitHash = envelope.Payload.Git.CommitHash
+	}
+	return meta, nil
 }
 
 type sessionSource string

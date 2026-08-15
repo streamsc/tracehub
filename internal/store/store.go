@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -16,7 +19,12 @@ import (
 	"tracehub/internal/codex"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound      = errors.New("not found")
+	ErrInvalidCursor = errors.New("invalid event cursor")
+)
+
+const schemaVersion = 1
 
 type Store struct {
 	db *sql.DB
@@ -45,15 +53,20 @@ type Session struct {
 	LastActivityAt string `json:"last_activity_at,omitempty"`
 	ForkedFromID   string `json:"forked_from_id,omitempty"`
 	Source         string `json:"source,omitempty"`
+	RepositoryURL  string `json:"repository_url,omitempty"`
+	GitBranch      string `json:"git_branch,omitempty"`
+	GitCommitHash  string `json:"git_commit_hash,omitempty"`
 }
 
 type SearchFilter struct {
-	DeviceID string `json:"device_id,omitempty"`
-	Query    string `json:"query,omitempty"`
-	Start    string `json:"start,omitempty"`
-	End      string `json:"end,omitempty"`
-	AfterID  int64  `json:"after_id,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
+	DeviceID      string `json:"device_id,omitempty"`
+	Query         string `json:"query,omitempty"`
+	RepositoryURL string `json:"repository_url,omitempty"`
+	CWD           string `json:"cwd,omitempty"`
+	Start         string `json:"start,omitempty"`
+	End           string `json:"end,omitempty"`
+	AfterID       int64  `json:"after_id,omitempty"`
+	Limit         int    `json:"limit,omitempty"`
 }
 
 type Event struct {
@@ -65,6 +78,20 @@ type Event struct {
 	ToolName   string `json:"tool_name,omitempty"`
 	ToolStatus string `json:"tool_status,omitempty"`
 	Truncated  bool   `json:"truncated,omitempty"`
+	TextOffset int    `json:"text_offset,omitempty"`
+	MoreText   bool   `json:"more_text,omitempty"`
+}
+
+type Checkpoint struct {
+	NextOffset   int64
+	PrefixSHA256 string
+}
+
+type PendingSession struct {
+	DeviceID   string
+	AgentType  string
+	SessionID  string
+	NextOffset int64
 }
 
 func Open(path string) (*Store, error) {
@@ -93,10 +120,22 @@ func Open(path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) initialize() error {
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version > schemaVersion {
+		return fmt.Errorf("database schema version %d is newer than supported version %d", version, schemaVersion)
+	}
+	if _, err := s.db.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON;`); err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	schema := `
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
-PRAGMA secure_delete=ON;
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   device_id TEXT NOT NULL,
@@ -108,6 +147,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   last_activity_at TEXT NOT NULL DEFAULT '',
   forked_from_id TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL DEFAULT '',
+  repository_url TEXT NOT NULL DEFAULT '',
+  git_branch TEXT NOT NULL DEFAULT '',
+  git_commit_hash TEXT NOT NULL DEFAULT '',
+  prefix_hash_state BLOB NOT NULL DEFAULT X'',
+  metadata_version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE(device_id, agent_type, session_id)
@@ -145,42 +189,93 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(text, device_id UNINDEXED, agent_type UNINDEXED, session_id UNINDEXED, seq UNINDEXED);
 INSERT INTO events_fts(events_fts, rank) VALUES('secure-delete', 1);
 `
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := tx.Exec(schema); err != nil {
+		return err
+	}
+	columns, err := tableColumns(tx, "sessions")
+	if err != nil {
+		return err
+	}
+	for name, definition := range map[string]string{
+		"repository_url":    "TEXT NOT NULL DEFAULT ''",
+		"git_branch":        "TEXT NOT NULL DEFAULT ''",
+		"git_commit_hash":   "TEXT NOT NULL DEFAULT ''",
+		"prefix_hash_state": "BLOB NOT NULL DEFAULT X''",
+		"metadata_version":  "INTEGER NOT NULL DEFAULT 0",
+	} {
+		if !columns[name] {
+			if _, err := tx.Exec(`ALTER TABLE sessions ADD COLUMN ` + name + ` ` + definition); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-func (s *Store) NextOffsets(ctx context.Context, deviceID, agentType string, sessionIDs []string) (map[string]int64, error) {
-	result := make(map[string]int64, len(sessionIDs))
+func tableColumns(tx *sql.Tx, table string) (map[string]bool, error) {
+	rows, err := tx.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, rows.Err()
+}
+
+func (s *Store) Checkpoints(ctx context.Context, deviceID, agentType string, sessionIDs []string) (map[string]Checkpoint, error) {
+	result := make(map[string]Checkpoint, len(sessionIDs))
 	for _, id := range sessionIDs {
 		var offset int64
-		err := s.db.QueryRowContext(ctx, `SELECT next_offset FROM sessions WHERE device_id=? AND agent_type=? AND session_id=?`, deviceID, agentType, id).Scan(&offset)
+		var state []byte
+		err := s.db.QueryRowContext(ctx, `SELECT next_offset,prefix_hash_state FROM sessions WHERE device_id=? AND agent_type=? AND session_id=?`, deviceID, agentType, id).Scan(&offset, &state)
 		if errors.Is(err, sql.ErrNoRows) {
-			result[id] = 0
+			result[id] = Checkpoint{NextOffset: 0, PrefixSHA256: emptySHA256()}
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		result[id] = offset
+		digest, err := hashStateDigest(state)
+		if err != nil {
+			return nil, fmt.Errorf("session %s has no valid prefix checkpoint: %w", id, err)
+		}
+		result[id] = Checkpoint{NextOffset: offset, PrefixSHA256: digest}
 	}
 	return result, nil
 }
 
-func (s *Store) PutChunk(ctx context.Context, chunk Chunk, parsed codex.ParsedChunk) (bool, error) {
+func (s *Store) PutChunk(ctx context.Context, chunk Chunk, plain []byte, prefixSHA256 string, parsed codex.ParsedChunk) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback()
 	var next int64
-	err = tx.QueryRowContext(ctx, `SELECT next_offset FROM sessions WHERE device_id=? AND agent_type=? AND session_id=?`, chunk.DeviceID, chunk.AgentType, chunk.SessionID).Scan(&next)
+	var hashState []byte
+	err = tx.QueryRowContext(ctx, `SELECT next_offset,prefix_hash_state FROM sessions WHERE device_id=? AND agent_type=? AND session_id=?`, chunk.DeviceID, chunk.AgentType, chunk.SessionID).Scan(&next, &hashState)
 	if errors.Is(err, sql.ErrNoRows) {
 		if chunk.StartOffset != 0 || parsed.Metadata == nil {
 			return false, fmt.Errorf("new session must begin at offset 0 with session metadata")
 		}
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		meta := parsed.Metadata
-		_, err = tx.ExecContext(ctx, `INSERT INTO sessions(device_id,agent_type,session_id,next_offset,cwd,started_at,last_activity_at,forked_from_id,source,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, chunk.DeviceID, chunk.AgentType, chunk.SessionID, 0, meta.CWD, meta.StartedAt, parsed.LastActivity, meta.ForkedFromID, meta.Source, now, now)
+		hashState, err = newHashState()
+		if err != nil {
+			return false, err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO sessions(device_id,agent_type,session_id,next_offset,cwd,started_at,last_activity_at,forked_from_id,source,repository_url,git_branch,git_commit_hash,prefix_hash_state,metadata_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, chunk.DeviceID, chunk.AgentType, chunk.SessionID, 0, meta.CWD, meta.StartedAt, parsed.LastActivity, meta.ForkedFromID, meta.Source, meta.RepositoryURL, meta.GitBranch, meta.GitCommitHash, hashState, 1, now, now)
 		if err != nil {
 			return false, err
 		}
@@ -199,6 +294,13 @@ func (s *Store) PutChunk(ctx context.Context, chunk Chunk, parsed codex.ParsedCh
 	}
 	if chunk.StartOffset != next {
 		return false, fmt.Errorf("offset conflict: expected %d, got %d", next, chunk.StartOffset)
+	}
+	nextHashState, digest, err := extendHashState(hashState, plain)
+	if err != nil {
+		return false, err
+	}
+	if !strings.EqualFold(digest, prefixSHA256) {
+		return false, fmt.Errorf("prefix SHA-256 mismatch: computed %s, got %s", digest, prefixSHA256)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = tx.ExecContext(ctx, `INSERT INTO chunks(device_id,agent_type,session_id,start_offset,end_offset,server_key_id,plain_sha256,plain_size,ciphertext,received_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, chunk.DeviceID, chunk.AgentType, chunk.SessionID, chunk.StartOffset, chunk.EndOffset, chunk.ServerKeyID, chunk.PlainSHA256, chunk.PlainSize, chunk.Ciphertext, now)
@@ -222,11 +324,83 @@ func (s *Store) PutChunk(ctx context.Context, chunk Chunk, parsed codex.ParsedCh
 			}
 		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE sessions SET next_offset=?,last_activity_at=CASE WHEN last_activity_at>? THEN last_activity_at ELSE ? END,updated_at=? WHERE device_id=? AND agent_type=? AND session_id=?`, chunk.EndOffset, parsed.LastActivity, parsed.LastActivity, now, chunk.DeviceID, chunk.AgentType, chunk.SessionID)
+	_, err = tx.ExecContext(ctx, `UPDATE sessions SET next_offset=?,prefix_hash_state=?,last_activity_at=CASE WHEN last_activity_at>? THEN last_activity_at ELSE ? END,updated_at=? WHERE device_id=? AND agent_type=? AND session_id=?`, chunk.EndOffset, nextHashState, parsed.LastActivity, parsed.LastActivity, now, chunk.DeviceID, chunk.AgentType, chunk.SessionID)
 	if err != nil {
 		return false, err
 	}
 	return false, tx.Commit()
+}
+
+func emptySHA256() string {
+	sum := sha256.Sum256(nil)
+	return hex.EncodeToString(sum[:])
+}
+
+func newHashState() ([]byte, error) {
+	return sha256.New().(encoding.BinaryMarshaler).MarshalBinary()
+}
+
+func extendHashState(state, plain []byte) ([]byte, string, error) {
+	if len(state) == 0 {
+		return nil, "", errors.New("empty prefix hash state")
+	}
+	hasher := sha256.New()
+	if err := hasher.(encoding.BinaryUnmarshaler).UnmarshalBinary(state); err != nil {
+		return nil, "", fmt.Errorf("decode prefix hash state: %w", err)
+	}
+	if _, err := hasher.Write(plain); err != nil {
+		return nil, "", err
+	}
+	next, err := hasher.(encoding.BinaryMarshaler).MarshalBinary()
+	if err != nil {
+		return nil, "", err
+	}
+	return next, hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func hashStateDigest(state []byte) (string, error) {
+	_, digest, err := extendHashState(state, nil)
+	return digest, err
+}
+
+func (s *Store) PendingBackfills(ctx context.Context) ([]PendingSession, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT device_id,agent_type,session_id,next_offset FROM sessions WHERE length(prefix_hash_state)=0 OR metadata_version<1 ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sessions []PendingSession
+	for rows.Next() {
+		var session PendingSession
+		if err := rows.Scan(&session.DeviceID, &session.AgentType, &session.SessionID, &session.NextOffset); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, rows.Err()
+}
+
+func (s *Store) FinishBackfill(ctx context.Context, session PendingSession, state []byte, meta codex.Metadata) error {
+	if _, err := hashStateDigest(state); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE sessions SET cwd=?,started_at=?,forked_from_id=?,source=?,repository_url=?,git_branch=?,git_commit_hash=?,prefix_hash_state=?,metadata_version=1 WHERE device_id=? AND agent_type=? AND session_id=? AND next_offset=? AND (length(prefix_hash_state)=0 OR metadata_version<1)`, meta.CWD, meta.StartedAt, meta.ForkedFromID, meta.Source, meta.RepositoryURL, meta.GitBranch, meta.GitCommitHash, state, session.DeviceID, session.AgentType, session.SessionID, session.NextOffset)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return errors.New("session changed during prefix backfill")
+	}
+	return tx.Commit()
 }
 
 func (s *Store) SearchSessions(ctx context.Context, filter SearchFilter) ([]Session, error) {
@@ -246,6 +420,14 @@ func (s *Store) SearchSessions(ctx context.Context, filter SearchFilter) ([]Sess
 		where = append(where, "s.device_id=?")
 		args = append(args, filter.DeviceID)
 	}
+	if filter.RepositoryURL != "" {
+		where = append(where, "s.repository_url=? COLLATE BINARY")
+		args = append(args, filter.RepositoryURL)
+	}
+	if filter.CWD != "" {
+		where = append(where, "s.cwd=? COLLATE BINARY")
+		args = append(args, filter.CWD)
+	}
 	if filter.Start != "" {
 		where = append(where, "s.last_activity_at>=?")
 		args = append(args, filter.Start)
@@ -255,7 +437,7 @@ func (s *Store) SearchSessions(ctx context.Context, filter SearchFilter) ([]Sess
 		args = append(args, filter.End)
 	}
 	args = append(args, limit)
-	query := `SELECT DISTINCT s.id,s.device_id,s.agent_type,s.session_id,s.next_offset,s.cwd,s.started_at,s.last_activity_at,s.forked_from_id,s.source FROM sessions s` + join + ` WHERE ` + strings.Join(where, " AND ") + ` ORDER BY s.id LIMIT ?`
+	query := `SELECT DISTINCT s.id,s.device_id,s.agent_type,s.session_id,s.next_offset,s.cwd,s.started_at,s.last_activity_at,s.forked_from_id,s.source,s.repository_url,s.git_branch,s.git_commit_hash FROM sessions s` + join + ` WHERE ` + strings.Join(where, " AND ") + ` ORDER BY s.id LIMIT ?`
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -264,7 +446,7 @@ func (s *Store) SearchSessions(ctx context.Context, filter SearchFilter) ([]Sess
 	var sessions []Session
 	for rows.Next() {
 		var session Session
-		if err := rows.Scan(&session.ID, &session.DeviceID, &session.AgentType, &session.SessionID, &session.NextOffset, &session.CWD, &session.StartedAt, &session.LastActivityAt, &session.ForkedFromID, &session.Source); err != nil {
+		if err := rows.Scan(&session.ID, &session.DeviceID, &session.AgentType, &session.SessionID, &session.NextOffset, &session.CWD, &session.StartedAt, &session.LastActivityAt, &session.ForkedFromID, &session.Source, &session.RepositoryURL, &session.GitBranch, &session.GitCommitHash); err != nil {
 			return nil, err
 		}
 		sessions = append(sessions, session)
@@ -274,43 +456,76 @@ func (s *Store) SearchSessions(ctx context.Context, filter SearchFilter) ([]Sess
 
 func (s *Store) Session(ctx context.Context, deviceID, agentType, sessionID string) (Session, error) {
 	var session Session
-	err := s.db.QueryRowContext(ctx, `SELECT id,device_id,agent_type,session_id,next_offset,cwd,started_at,last_activity_at,forked_from_id,source FROM sessions WHERE device_id=? AND agent_type=? AND session_id=?`, deviceID, agentType, sessionID).Scan(&session.ID, &session.DeviceID, &session.AgentType, &session.SessionID, &session.NextOffset, &session.CWD, &session.StartedAt, &session.LastActivityAt, &session.ForkedFromID, &session.Source)
+	err := s.db.QueryRowContext(ctx, `SELECT id,device_id,agent_type,session_id,next_offset,cwd,started_at,last_activity_at,forked_from_id,source,repository_url,git_branch,git_commit_hash FROM sessions WHERE device_id=? AND agent_type=? AND session_id=?`, deviceID, agentType, sessionID).Scan(&session.ID, &session.DeviceID, &session.AgentType, &session.SessionID, &session.NextOffset, &session.CWD, &session.StartedAt, &session.LastActivityAt, &session.ForkedFromID, &session.Source, &session.RepositoryURL, &session.GitBranch, &session.GitCommitHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
 	return session, err
 }
 
-func (s *Store) Events(ctx context.Context, deviceID, agentType, sessionID string, after int64, limit int, maxBytes int) ([]Event, int64, error) {
+func (s *Store) Events(ctx context.Context, deviceID, agentType, sessionID string, after int64, textOffset, limit int, maxBytes int) ([]Event, int64, int, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT seq,kind,occurred_at,phase,text,tool_name,tool_status FROM events WHERE device_id=? AND agent_type=? AND session_id=? AND seq>? ORDER BY seq LIMIT ?`, deviceID, agentType, sessionID, after, limit)
+	if after < 0 || textOffset < 0 {
+		return nil, after, textOffset, ErrInvalidCursor
+	}
+	operator := ">"
+	if textOffset > 0 {
+		operator = ">="
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT seq,kind,occurred_at,phase,text,tool_name,tool_status FROM events WHERE device_id=? AND agent_type=? AND session_id=? AND seq`+operator+`? ORDER BY seq LIMIT ?`, deviceID, agentType, sessionID, after, limit)
 	if err != nil {
-		return nil, after, err
+		return nil, after, textOffset, err
 	}
 	defer rows.Close()
 	var events []Event
 	next := after
+	nextTextOffset := textOffset
 	used := 0
 	for rows.Next() {
 		var event Event
 		if err := rows.Scan(&event.Seq, &event.Kind, &event.OccurredAt, &event.Phase, &event.Text, &event.ToolName, &event.ToolStatus); err != nil {
-			return nil, after, err
+			return nil, after, textOffset, err
+		}
+		start := 0
+		if textOffset > 0 && len(events) == 0 && event.Seq != after {
+			return nil, after, textOffset, ErrInvalidCursor
+		}
+		if textOffset > 0 && event.Seq == after {
+			start = textOffset
+			if start >= len(event.Text) || !utf8.ValidString(event.Text[start:]) {
+				return nil, after, textOffset, ErrInvalidCursor
+			}
 		}
 		remaining := maxBytes - used
 		if remaining <= 0 {
 			break
 		}
+		fullText := event.Text
+		event.TextOffset = start
+		event.Text = fullText[start:]
 		if len(event.Text) > remaining {
 			event.Text = truncateUTF8(event.Text, remaining)
+			if event.Text == "" {
+				break
+			}
 			event.Truncated = true
+			event.MoreText = true
 		}
-		used += len(event.Text) + len(event.ToolName) + 128
+		used += len(event.Text)
 		events = append(events, event)
 		next = event.Seq
+		if event.MoreText {
+			nextTextOffset = start + len(event.Text)
+			break
+		}
+		nextTextOffset = 0
 	}
-	return events, next, rows.Err()
+	if textOffset > 0 && len(events) == 0 {
+		return nil, after, textOffset, ErrInvalidCursor
+	}
+	return events, next, nextTextOffset, rows.Err()
 }
 
 func (s *Store) EventChunk(ctx context.Context, deviceID, agentType, sessionID string, seq int64) (Chunk, error) {

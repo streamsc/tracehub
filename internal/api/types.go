@@ -9,6 +9,7 @@ const (
 	HeaderPlainSHA256   = "X-TraceHub-Plain-Sha256"
 	HeaderPlainSize     = "X-TraceHub-Plain-Size"
 	HeaderServerKeyID   = "X-TraceHub-Server-Key-Id"
+	HeaderPrefixSHA256  = "X-TraceHub-Prefix-Sha256"
 	MaxPageBytes        = 256 << 10
 	MaxManifestSessions = 10000
 )
@@ -24,7 +25,12 @@ type SyncPlanRequest struct {
 }
 
 type SyncPlanResponse struct {
-	Offsets map[string]int64 `json:"offsets"`
+	Sessions map[string]SyncCheckpoint `json:"sessions"`
+}
+
+type SyncCheckpoint struct {
+	NextOffset   int64  `json:"next_offset"`
+	PrefixSHA256 string `json:"prefix_sha256"`
 }
 
 type DevicesResponse struct {
@@ -40,6 +46,7 @@ type EventsResponse struct {
 	UntrustedHistoricalData bool          `json:"untrusted_historical_data"`
 	Events                  []store.Event `json:"events"`
 	NextSeq                 int64         `json:"next_seq"`
+	NextTextOffset          int           `json:"next_text_offset,omitempty"`
 }
 
 type ToolOutputResponse struct {
